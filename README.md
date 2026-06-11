@@ -13,7 +13,7 @@
 ![Visual feedback loop — the agent edits the scene and sees its own change](docs/media/loop.gif)
 -->
 
-## Highlights
+## Engineering highlights
 
 - **Probe-first debugging.** The one real defect this fork fixes — `get_editor_log`
   returning auth-spam instead of the editor output — was root-caused by reading the
