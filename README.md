@@ -2,10 +2,9 @@
 
 [![CI](https://github.com/lexosi/uefn-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/lexosi/uefn-mcp-server/actions/workflows/ci.yml)
 
-> An MCP server that lets an AI agent drive the **Unreal Editor for Fortnite** —
-> and a small study in doing editor automation with engineering discipline:
-> probe-first debugging, a synchronous visual feedback loop, and tests built
-> around negative controls.
+> An MCP server that lets an AI agent drive the **Unreal Editor for Fortnite**
+> from Claude Code (or any MCP client): inspect and edit actors and assets, run
+> editor Python, and capture the viewport back to the model as an image.
 
 <!-- Demo GIF — uncomment the line below once docs/media/loop.gif is recorded.
      Kept commented so the top of the README shows no broken image until the
@@ -14,7 +13,7 @@
 ![Visual feedback loop — the agent edits the scene and sees its own change](docs/media/loop.gif)
 -->
 
-## Engineering highlights
+## Highlights
 
 - **Probe-first debugging.** The one real defect this fork fixes — `get_editor_log`
   returning auth-spam instead of the editor output — was root-caused by reading the
