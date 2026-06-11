@@ -412,14 +412,18 @@ def focus_selected() -> str:
 
 
 @mcp.tool()
-def get_editor_log(last_n: int = 100, filter_str: str = "") -> str:
+def get_editor_log(last_n: int = 100, filter_str: str = "", log_file: str = "") -> str:
     """Read recent lines from the Unreal Editor Output Log.
+
+    Auto-detects the active editor log (e.g. UnrealEditorFortnite.log), skipping
+    the noisier revision-control and CEF logs in the same directory.
 
     Args:
         last_n: Number of recent lines to return.
         filter_str: Optional filter — only lines containing this string (case-insensitive).
+        log_file: Optional explicit log path. Overrides auto-detection.
     """
-    result = _send_command("get_editor_log", {"last_n": last_n, "filter_str": filter_str})
+    result = _send_command("get_editor_log", {"last_n": last_n, "filter_str": filter_str, "log_file": log_file})
     lines = result.get("lines", [])
     if result.get("error"):
         return f"Error: {result['error']}"

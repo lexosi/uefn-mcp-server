@@ -27,7 +27,7 @@ import unreal
 # Configuration
 # ---------------------------------------------------------------------------
 
-PROTOCOL_VERSION = "0.2.0"
+PROTOCOL_VERSION = "0.3.0"
 DEFAULT_PORT = 8765
 MAX_PORT = 8770
 TICK_BATCH_LIMIT = 5
@@ -112,6 +112,30 @@ def _log(msg: str, level: str = "info") -> None:
 def _run_on_main_thread(fn: Callable[[], Any]) -> None:
     """Schedule *fn* to execute on the UE main thread (next tick)."""
     _main_queue.put(fn)
+
+
+# ---------------------------------------------------------------------------
+# Editor subsystem accessors
+#
+# EditorLevelLibrary is deprecated (Editor Scripting Utilities Plugin). The
+# replacement APIs live on these editor subsystems. Fetching a subsystem is
+# cheap, so we resolve on demand rather than cache.
+# ---------------------------------------------------------------------------
+
+
+def _actor_sub() -> Any:
+    """EditorActorSubsystem — actor spawn/destroy/selection."""
+    return unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+
+
+def _unreal_editor_sub() -> Any:
+    """UnrealEditorSubsystem — editor world and viewport camera."""
+    return unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem)
+
+
+def _level_editor_sub() -> Any:
+    """LevelEditorSubsystem — level save/load."""
+    return unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
 
 
 # ---------------------------------------------------------------------------
@@ -339,12 +363,12 @@ def _cmd_spawn_actor(
         asset = unreal.EditorAssetLibrary.load_asset(asset_path)
         if asset is None:
             raise ValueError(f"Asset not found: {asset_path}")
-        actor = unreal.EditorLevelLibrary.spawn_actor_from_object(asset, loc, rot)
+        actor = _actor_sub().spawn_actor_from_object(asset, loc, rot)
     elif actor_class:
         cls = getattr(unreal, actor_class, None)
         if cls is None:
             raise ValueError(f"Class not found: {actor_class}")
-        actor = unreal.EditorLevelLibrary.spawn_actor_from_class(cls, loc, rot)
+        actor = _actor_sub().spawn_actor_from_class(cls, loc, rot)
     else:
         raise ValueError("Provide either asset_path or actor_class")
 
@@ -491,7 +515,7 @@ def _cmd_focus_selected() -> dict:
     cam_loc = unreal.Vector(center_x - cam_dist * 0.5, center_y - cam_dist * 0.5, center_z + cam_dist * 0.5)
     cam_rot = unreal.Rotator(-35, 45, 0)
 
-    unreal.EditorLevelLibrary.set_level_viewport_camera_info(cam_loc, cam_rot)
+    _unreal_editor_sub().set_level_viewport_camera_info(cam_loc, cam_rot)
     return {
         "center": {"x": center_x, "y": center_y, "z": center_z},
         "camera": _serialize(cam_loc),
@@ -501,32 +525,58 @@ def _cmd_focus_selected() -> dict:
 
 
 
-@_register("get_editor_log")
-def _cmd_get_editor_log(last_n: int = 100, filter_str: str = "") -> dict:
-    """Read recent lines from the UE Output Log file."""
-    log_path = unreal.Paths.project_log_dir()
-    log_file = None
-    try:
-        import os
-        log_dir = str(log_path)
-        # Find the most recent .log file
-        log_files = [f for f in os.listdir(log_dir) if f.endswith(".log")]
-        if log_files:
-            log_files.sort(key=lambda f: os.path.getmtime(os.path.join(log_dir, f)), reverse=True)
-            log_file = os.path.join(log_dir, log_files[0])
-    except Exception:
-        pass
+def _find_editor_log() -> Optional[str]:
+    """Locate the active UE Output Log file.
 
-    if not log_file:
+    The log directory holds several .log files written concurrently
+    (UnrealRevisionControl.log, cef3.log, the editor log, plus rotated
+    *-backup-* copies). Picking the newest by mtime is wrong: the
+    revision-control / transport log is rewritten every few seconds and
+    almost always wins, returning auth spam instead of the editor output.
+
+    The real editor log is named after the application (e.g.
+    ``UnrealEditorFortnite.log``). We derive that prefix from the running
+    executable, keep only matching non-backup logs, and return the newest.
+    Falls back to the newest non-backup .log if no prefix match exists.
+    """
+    import os
+
+    log_dir = os.path.abspath(str(unreal.Paths.project_log_dir()))
+    if not os.path.isdir(log_dir):
+        return None
+
+    # App prefix from the executable: "UnrealEditorFortnite-Win64-Shipping" -> "UnrealEditorFortnite"
+    app_prefix = os.path.splitext(os.path.basename(sys.executable))[0].split("-")[0]
+
+    logs = [f for f in os.listdir(log_dir) if f.lower().endswith(".log") and "-backup-" not in f]
+    matching = [f for f in logs if f.startswith(app_prefix)] or logs
+    if not matching:
+        return None
+    matching.sort(key=lambda f: os.path.getmtime(os.path.join(log_dir, f)), reverse=True)
+    return os.path.join(log_dir, matching[0])
+
+
+@_register("get_editor_log")
+def _cmd_get_editor_log(last_n: int = 100, filter_str: str = "", log_file: str = "") -> dict:
+    """Read recent lines from the UE Output Log file.
+
+    Args:
+        last_n: Number of recent lines to return.
+        filter_str: Optional case-insensitive substring filter.
+        log_file: Optional explicit log path. Overrides auto-detection.
+    """
+    target = log_file or _find_editor_log()
+    if not target:
         return {"lines": [], "error": "Log file not found"}
 
     try:
-        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+        with open(target, "r", encoding="utf-8", errors="replace") as f:
             all_lines = f.readlines()
-        lines = all_lines[-last_n:]
+        # Filter first, then tail — so last_n counts matching lines, not raw lines.
         if filter_str:
-            lines = [l for l in lines if filter_str.lower() in l.lower()]
-        return {"lines": [l.rstrip() for l in lines], "count": len(lines), "file": log_file}
+            all_lines = [l for l in all_lines if filter_str.lower() in l.lower()]
+        lines = all_lines[-last_n:]
+        return {"lines": [l.rstrip() for l in lines], "count": len(lines), "file": target}
     except Exception as e:
         return {"lines": [], "error": str(e)}
 
@@ -622,7 +672,7 @@ def _cmd_search_assets(class_name: str = "", directory: str = "/Game/", recursiv
 @_register("get_project_info")
 def _cmd_get_project_info() -> dict:
     """Get project name and content root path."""
-    world = unreal.EditorLevelLibrary.get_editor_world()
+    world = _unreal_editor_sub().get_editor_world()
     project_name = ""
     content_root = ""
     if world:
@@ -643,15 +693,14 @@ def _cmd_get_project_info() -> dict:
 
 @_register("save_current_level")
 def _cmd_save_current_level() -> dict:
-    success = unreal.EditorLevelLibrary.save_current_level()
+    success = _level_editor_sub().save_current_level()
     return {"success": success}
 
 
 @_register("get_level_info")
 def _cmd_get_level_info() -> dict:
-    world = unreal.EditorLevelLibrary.get_editor_world()
-    actor_sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
-    actors = actor_sub.get_all_level_actors()
+    world = _unreal_editor_sub().get_editor_world()
+    actors = _actor_sub().get_all_level_actors()
     return {
         "world_name": world.get_name() if world else "None",
         "actor_count": len(actors),
@@ -663,7 +712,7 @@ def _cmd_get_level_info() -> dict:
 
 @_register("get_viewport_camera")
 def _cmd_get_viewport_camera() -> dict:
-    loc, rot = unreal.EditorLevelLibrary.get_level_viewport_camera_info()
+    loc, rot = _unreal_editor_sub().get_level_viewport_camera_info()
     return {"location": _serialize(loc), "rotation": _serialize(rot)}
 
 
@@ -672,10 +721,11 @@ def _cmd_set_viewport_camera(
     location: Optional[List[float]] = None,
     rotation: Optional[List[float]] = None,
 ) -> dict:
-    cur_loc, cur_rot = unreal.EditorLevelLibrary.get_level_viewport_camera_info()
+    ues = _unreal_editor_sub()
+    cur_loc, cur_rot = ues.get_level_viewport_camera_info()
     loc = unreal.Vector(*location) if location else cur_loc
     rot = unreal.Rotator(*rotation) if rotation else cur_rot
-    unreal.EditorLevelLibrary.set_level_viewport_camera_info(loc, rot)
+    ues.set_level_viewport_camera_info(loc, rot)
     return {"location": _serialize(loc), "rotation": _serialize(rot)}
 
 
