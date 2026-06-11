@@ -9,6 +9,8 @@ Usage (in UEFN editor console):
 Or auto-start via init_unreal.py.
 """
 
+from __future__ import annotations
+
 import io
 import json
 import os
