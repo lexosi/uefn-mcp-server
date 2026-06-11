@@ -1,0 +1,6 @@
+# Host-side runtime dependency for the MCP server (mcp_server.py).
+#
+# The UEFN listener (uefn_listener.py) intentionally has NO third-party
+# dependencies — it uses only the standard library and runs inside UEFN's
+# embedded Python, which cannot pip-install packages.
+mcp>=1.0

@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: Unit tests (no editor)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      # CI runs ONLY the unit layer: `pytest -m "not live"`.
+      #
+      # This is deliberate, not a gap. The suite is split into two layers:
+      #   * unit          — pure logic, imported with a stub `unreal` module and
+      #                      UEFN_LISTENER_NO_AUTOSTART so no socket is bound.
+      #                      Fully runnable on a CI runner.
+      #   * live          — talks to the UEFN listener, which runs INSIDE the
+      #                      Fortnite editor. That editor cannot exist on a CI
+      #                      runner, so these tests are excluded here and run
+      #                      manually against a live editor.
+      #
+      # Knowing which behaviour is CI-able and which is editor-bound is part of
+      # the design. See docs/TESTING.md.
+      - name: Run unit tests
+        run: pytest -m "not live"
