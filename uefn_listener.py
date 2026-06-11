@@ -1246,9 +1246,21 @@ def restart_listener(port: int = 0) -> int:
 # ---------------------------------------------------------------------------
 
 try:
-    # If a previous HTTP server exists, close its socket to free the port.
+    # If a previous HTTP server exists, stop it cleanly and free the port.
     if unreal._mcp_server is not None:
         _log("Previous listener detected — replacing")
+        # shutdown() first: stops serve_forever() so its worker thread leaves
+        # the select() loop before we close the socket. Skipping this lets the
+        # old thread call select() on a closed fd -> OSError WinError 10038.
+        try:
+            unreal._mcp_server.shutdown()
+        except Exception:
+            pass
+        if unreal._mcp_server_thread is not None:
+            try:
+                unreal._mcp_server_thread.join(timeout=3.0)
+            except Exception:
+                pass
         try:
             unreal._mcp_server.server_close()
         except Exception:
