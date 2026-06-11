@@ -1,59 +1,93 @@
 # UEFN MCP Server
 
-Control [UEFN](https://dev.epicgames.com/documentation/en-us/fortnite/unreal-editor-for-fortnite) (Unreal Editor for Fortnite) from [Claude Code](https://docs.anthropic.com/en/docs/claude-code) via the [Model Context Protocol](https://modelcontextprotocol.io/).
+[![CI](https://github.com/lexosi/uefn-mcp-server/actions/workflows/ci.yml/badge.svg)](https://github.com/lexosi/uefn-mcp-server/actions/workflows/ci.yml)
+
+> An MCP server that lets an AI agent drive the **Unreal Editor for Fortnite** —
+> and a small study in doing editor automation with engineering discipline:
+> probe-first debugging, a synchronous visual feedback loop, and tests built
+> around negative controls.
+
+<!-- Demo GIF — uncomment the line below once docs/media/loop.gif is recorded.
+     Kept commented so the top of the README shows no broken image until the
+     file exists. See the "Recording the demo GIF" section for what to capture.
+
+![Visual feedback loop — the agent edits the scene and sees its own change](docs/media/loop.gif)
+-->
+
+## Engineering highlights
+
+- **Probe-first debugging.** The one real defect this fork fixes — `get_editor_log`
+  returning auth-spam instead of the editor output — was root-caused by reading the
+  actual UEFN log directory at runtime and confirming which file the heuristic
+  picked, not by guessing. The fix is small and targeted; every assumption behind
+  it was checked against a live editor first. ([before/after](CHANGELOG.md))
+- **Negative-control testing.** The suite pairs each fix with a control that proves
+  the bug was real, and guards "successful-but-wrong" outcomes (a screenshot that
+  is a black frame; a log call that returns revision-control spam). A test that
+  cannot fail is treated as no test. → **[docs/TESTING.md](docs/TESTING.md)**
+- **Multimodal AI ↔ editor loop.** `get_viewport_screenshot` renders the editor
+  camera off-screen and returns the image to the model, so an agent can *see* the
+  scene it is editing and self-correct. It uses a synchronous `SceneCapture2D`
+  path, engineered around the stock screenshot API whose write is deferred to a
+  later frame and stalls when the editor window is not redrawing.
+
+Everything above is **verified against a live editor**. Candidate tools that are
+*not* built yet are kept separate, in a feasibility-gated roadmap
+([docs/proposed_tools.md](docs/proposed_tools.md)) that documents what UEFN's
+Python actually allows — and what it crashes on.
+
+## Fork & credits
+
+This is a fork of **[KirChuvakov/uefn-mcp-server](https://github.com/KirChuvakov/uefn-mcp-server)**.
+
+**Upstream** built the foundation: the two-process architecture, the HTTP
+listener with port discovery and a status window, and the initial 28 tools.
+
+**This fork adds:**
+
+| Area | Change |
+|------|--------|
+| Bug fix | Correct editor-log targeting (was returning the revision-control spam log) |
+| Hardening | Migrated 8 deprecated `EditorLevelLibrary` calls to editor Subsystems; clean listener hot-reload |
+| Feature | `get_viewport_screenshot` — synchronous viewport capture returned to the model |
+| Tests | pytest suite (unit + live + canary negative controls) and CI |
+| Docs | testing methodology, feasibility-gated roadmap, changelog |
+
+See the [CHANGELOG](CHANGELOG.md) for the full, versioned history of this fork.
+
+## What it is
 
 ```
 Claude Code  <--stdio-->  MCP Server (mcp_server.py)  <--HTTP-->  Listener (uefn_listener.py, inside UEFN)
 ```
 
-- **29 tools**: actors, assets, levels, viewport, **viewport screenshots**, project info, editor log, and arbitrary Python execution
-- **Zero C++ compilation** — pure Python, works across UEFN versions
-- **Main-thread safe** — all `unreal.*` calls dispatched via editor tick callback
+- **29 tools**: actors, assets, levels, viewport, **viewport screenshots**, project info, editor log, and arbitrary Python execution.
+- **Zero C++ compilation** — pure Python, works across UEFN versions.
+- **Main-thread safe** — all `unreal.*` calls dispatched via the editor tick callback.
 
-## Highlights
+UEFN's Python runs **editor-only** (not at game runtime); gameplay logic lives in
+Verse. This server is for editor tooling: inspection, content pipelines, layout,
+and debugging.
 
-- **Visual feedback loop** — `get_viewport_screenshot` renders the editor camera off-screen through a `SceneCapture2D` and returns the PNG to the model. The agent can *see* the scene it is editing and self-correct, instead of working blind. The synchronous capture sidesteps `take_high_res_screenshot`'s deferred, redraw-dependent write.
-- **Built around UEFN's real limits** — UEFN Python is editor-only and runs on the render thread; there is no play-in-editor, LOD generation crashes the editor, and V2 device config lives in Verse, not UPROPERTYs. Tools are designed to stay inside what UEFN actually allows. See [docs/proposed_tools.md](docs/proposed_tools.md) for the feasibility-gated roadmap.
-- **Resilient transport** — auto port discovery (8765-8770), heartbeat liveness, graceful listener hot-reload, and a floating status window with live metrics.
-
-## Quick Start
-
-### 0. Let Claude do the setup
-
-Open Claude Code and ask: *"Help me set up UEFN MCP server"* — it will install dependencies, create config files, and walk you through the rest.
-
-If you prefer to do it manually, follow steps 1-5 below.
+## Quick start
 
 ### 1. Enable Python in UEFN
 
-1. Open your project in UEFN
-2. Go to **Project > Project Settings**
-3. Search for **Python** and check the box for **Python Editor Script Plugin**
+**Project > Project Settings**, search **Python**, enable **Python Editor Script Plugin**.
 
 ### 2. Start the listener inside UEFN
 
-Use **Tools > Execute Python Script** in the UEFN menu bar, then select the `uefn_listener.py` file.
+**Tools > Execute Python Script** → select `uefn_listener.py`. A status window shows
+listener/connection state, port, and live metrics. You can close it; the listener
+keeps running.
 
-A **status window** will appear showing:
-- **Listener status** — green when running, red when stopped
-- **MCP Server status** — green when Claude Code is connected (heartbeat every 10s)
-- **Port** — editable when listener is stopped
-- **Metrics** — uptime, request count, errors, last command, avg response time
-- **Controls** — Stop / Start / Restart buttons
-
-You can safely close this window — the listener continues running in the background.
-
-### 3. Install MCP SDK
-
-On your system (not inside UEFN):
+### 3. Install and configure
 
 ```bash
-pip install mcp
+pip install -r requirements.txt   # the `mcp` SDK
 ```
 
-### 4. Configure Claude Code
-
-Create `.mcp.json` in your project root (or add to `~/.claude/settings.json`):
+Create `.mcp.json` in your project root:
 
 ```json
 {
@@ -66,30 +100,13 @@ Create `.mcp.json` in your project root (or add to `~/.claude/settings.json`):
 }
 ```
 
-### 5. Restart Claude Code
-
-Claude Code picks up `.mcp.json` on startup. After restart, you'll have 29 UEFN tools available.
+Restart Claude Code. You'll have 29 UEFN tools available.
 
 ### Try it
 
-Ask Claude Code:
 - *"List all actors in the level"*
-- *"Spawn a cube at position 100, 200, 300"*
-- *"What assets are in /Game/Materials/?"*
-- *"Move the viewport camera to look at the origin"*
+- *"Spawn a cube at 100, 200, 300"*
 - *"Take a screenshot of the viewport and tell me what's wrong with the layout"*
-
-## Auto-start (optional)
-
-To start the listener automatically when UEFN opens your project:
-
-```bash
-# Copy both files to your UEFN project's Content/Python/ directory
-cp uefn_listener.py  <YourUEFNProject>/Content/Python/uefn_listener.py
-cp init_unreal.py     <YourUEFNProject>/Content/Python/init_unreal.py
-```
-
-UEFN automatically executes `init_unreal.py` on project open.
 
 ## Tools
 
@@ -98,113 +115,78 @@ UEFN automatically executes `init_unreal.py` on project open.
 | **System** | `ping`, `execute_python`, `get_log`, `get_editor_log`, `shutdown` |
 | **Actors** | `get_all_actors`, `get_selected_actors`, `spawn_actor`, `delete_actors`, `set_actor_transform`, `get_actor_properties`, `set_actor_properties`, `select_actors`, `focus_selected` |
 | **Assets** | `list_assets`, `get_asset_info`, `get_selected_assets`, `rename_asset`, `delete_asset`, `duplicate_asset`, `does_asset_exist`, `save_asset`, `search_assets` |
-| **Project** | `get_project_info` |
-| **Level** | `save_current_level`, `get_level_info` |
+| **Project / Level** | `get_project_info`, `save_current_level`, `get_level_info` |
 | **Viewport** | `get_viewport_camera`, `set_viewport_camera`, `get_viewport_screenshot` |
 
-The `execute_python` tool is the most powerful — it runs arbitrary Python code inside the editor with full access to the `unreal` module:
+The `execute_python` tool runs arbitrary Python inside the editor with full access
+to the `unreal` module:
 
 ```python
-# Pre-populated variables: unreal, actor_sub, asset_sub, level_sub, tk, get_tk_root
+# Pre-populated: unreal, actor_sub, asset_sub, level_sub, tk, get_tk_root
 # Assign to `result` to return a value
-
 actors = actor_sub.get_all_level_actors()
 result = [a.get_actor_label() for a in actors]
 ```
 
-> **Tkinter note:** When creating UI windows via `execute_python`, use `get_tk_root()` + `tk.Toplevel(root)`. Never call `tk.Tk()` — multiple instances crash the editor.
-
-## Architecture
-
-The system uses two independently running Python processes:
-
-| Component | File | Runs in | Python | Dependencies |
-|-----------|------|---------|--------|--------------|
-| **Listener** | `uefn_listener.py` | UEFN editor process | 3.11+ (embedded) | stdlib only |
-| **MCP Server** | `mcp_server.py` | External process | 3.10+ (system) | `mcp` SDK |
-
-**Why two processes?**
-- All `unreal.*` calls must happen on the editor's main thread (tick callback)
-- The MCP SDK needs pip-installable packages that can't be added to UEFN's embedded Python
-- Each component can restart independently
-
-See [docs/architecture.md](docs/architecture.md) for details.
-
-## Configuration
-
-### Custom port
-
-```json
-{
-  "mcpServers": {
-    "uefn": {
-      "command": "python",
-      "args": ["path/to/mcp_server.py", "--port", "8766"]
-    }
-  }
-}
-```
-
-Or via environment variable:
-
-```json
-{
-  "mcpServers": {
-    "uefn": {
-      "command": "python",
-      "args": ["path/to/mcp_server.py"],
-      "env": { "UEFN_MCP_PORT": "8766" }
-    }
-  }
-}
-```
-
-## Bonus Tools
-
-Scripts that run inside the UEFN editor to introspect the Python API.
-Run via **Tools > Execute Python Script** in the UEFN menu bar.
-
-| Script | Description |
-|--------|-------------|
-| [`tools/dump_uefn_api.py`](tools/dump_uefn_api.py) | Dump all classes, enums, structs, functions to JSON |
-| [`tools/generate_uefn_stub.py`](tools/generate_uefn_stub.py) | Generate `.pyi` type stub for IDE autocomplete (37K+ types) |
-| [`tests/test_feasibility.py`](tests/test_feasibility.py) | Verify UEFN sandbox supports HTTP/threading for MCP |
+> **Tkinter note:** create UI via `get_tk_root()` + `tk.Toplevel(root)`. Never call
+> `tk.Tk()` — multiple instances crash the editor.
 
 ## Testing
 
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements.txt -r requirements-dev.txt
 
-pytest               # unit + canary tests (live tests auto-skip without a listener)
-pytest -m live       # live integration against a running UEFN listener
-pytest -m canary     # only the false-positive guards
+pytest -m "not live"   # unit + unit canaries (what CI runs)
+pytest -m live         # live integration against a running UEFN listener
 ```
 
-Unit tests run without the editor — `conftest.py` injects a stub `unreal` module
-and sets `UEFN_LISTENER_NO_AUTOSTART` so importing the listener binds no socket.
-The suite includes **canary** tests: negative controls that go red if a known
-bug regresses or the harness is broken (e.g. the editor-log selector falling
-back to the revision-control spam log, or a screenshot returning a blank frame).
-See [tests/README.md](tests/README.md).
+CI runs only the unit layer — the live layer needs the Fortnite editor, which a CI
+runner does not have. That boundary is deliberate; the methodology and the list of
+canary controls are in **[docs/TESTING.md](docs/TESTING.md)**.
+
+## Architecture
+
+Two independently running Python processes:
+
+| Component | File | Runs in | Dependencies |
+|-----------|------|---------|--------------|
+| **Listener** | `uefn_listener.py` | UEFN editor process | stdlib only |
+| **MCP Server** | `mcp_server.py` | External process | `mcp` SDK |
+
+`unreal.*` calls must happen on the editor's main thread (tick callback); the MCP
+SDK needs pip packages that can't be added to UEFN's embedded Python. Splitting the
+two also lets each restart independently. See [docs/architecture.md](docs/architecture.md).
+
+## Recording the demo GIF
+
+`docs/media/loop.gif` is a screen recording (the viewport can't be captured
+headless). Capture 3–5 seconds that show the *loop*, not just a screenshot:
+
+1. The agent runs `get_viewport_screenshot` and the returned image appears in chat.
+2. The agent makes one visible edit (e.g. moves or spawns an actor).
+3. The agent screenshots again and the change is visible in the second image.
+
+The point to convey: the model *sees its own change* and closes the loop.
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [Setup Guide](docs/setup.md) | Detailed installation and configuration |
-| [Tools Reference](docs/tools_reference.md) | All tools with parameters, examples, and responses |
-| [Architecture](docs/architecture.md) | How the two-component system works internally |
-| [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
-| [UEFN Python Capabilities](docs/uefn_python_capabilities.md) | Full API capabilities map — 37K types across 30 domains |
-| [Proposed Tools (roadmap)](docs/proposed_tools.md) | Feasibility-gated roadmap of candidate tools and UEFN limits |
+| [Testing](docs/TESTING.md) | Test layers and the canary / negative-control methodology |
+| [Proposed tools (roadmap)](docs/proposed_tools.md) | Feasibility-gated candidates and UEFN's hard limits |
+| [Architecture](docs/architecture.md) | How the two-component system works |
+| [Tools reference](docs/tools_reference.md) | Per-tool parameters, examples, responses |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues |
+| [UEFN Python capabilities](docs/uefn_python_capabilities.md) | Full API capability map |
+| [Changelog](CHANGELOG.md) | Versioned history of this fork |
 
 ## Requirements
 
-- UEFN editor with Python scripting enabled (Project Settings)
-- Python 3.10+ on host system
-- `pip install mcp`
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI
+- UEFN with Python scripting enabled
+- Python 3.10+ on the host
+- `pip install -r requirements.txt`
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (or any MCP client)
 
 ## License
 
-MIT
+MIT (inherited from upstream). See [LICENSE](LICENSE).
