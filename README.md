@@ -170,6 +170,23 @@ Run via **Tools > Execute Python Script** in the UEFN menu bar.
 | [`tools/generate_uefn_stub.py`](tools/generate_uefn_stub.py) | Generate `.pyi` type stub for IDE autocomplete (37K+ types) |
 | [`tests/test_feasibility.py`](tests/test_feasibility.py) | Verify UEFN sandbox supports HTTP/threading for MCP |
 
+## Testing
+
+```bash
+pip install -r requirements-dev.txt
+
+pytest               # unit + canary tests (live tests auto-skip without a listener)
+pytest -m live       # live integration against a running UEFN listener
+pytest -m canary     # only the false-positive guards
+```
+
+Unit tests run without the editor — `conftest.py` injects a stub `unreal` module
+and sets `UEFN_LISTENER_NO_AUTOSTART` so importing the listener binds no socket.
+The suite includes **canary** tests: negative controls that go red if a known
+bug regresses or the harness is broken (e.g. the editor-log selector falling
+back to the revision-control spam log, or a screenshot returning a blank frame).
+See [tests/README.md](tests/README.md).
+
 ## Documentation
 
 | Document | Description |

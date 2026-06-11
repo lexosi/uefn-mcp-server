@@ -1,0 +1,4 @@
+# Development / test dependencies (host system, not UEFN's embedded Python).
+#   pip install -r requirements-dev.txt
+pytest>=7.4
+Pillow>=10.0   # only used by the live screenshot "not-blank" canary

@@ -11,6 +11,7 @@ Or auto-start via init_unreal.py.
 
 import io
 import json
+import os
 import queue
 import socket
 import sys
@@ -27,7 +28,7 @@ import unreal
 # Configuration
 # ---------------------------------------------------------------------------
 
-PROTOCOL_VERSION = "0.4.0"
+PROTOCOL_VERSION = "0.4.1"
 DEFAULT_PORT = 8765
 MAX_PORT = 8770
 TICK_BATCH_LIMIT = 5
@@ -525,7 +526,7 @@ def _cmd_focus_selected() -> dict:
 
 
 
-def _find_editor_log() -> Optional[str]:
+def _find_editor_log(log_dir: Optional[str] = None, exe_path: Optional[str] = None) -> Optional[str]:
     """Locate the active UE Output Log file.
 
     The log directory holds several .log files written concurrently
@@ -538,15 +539,22 @@ def _find_editor_log() -> Optional[str]:
     ``UnrealEditorFortnite.log``). We derive that prefix from the running
     executable, keep only matching non-backup logs, and return the newest.
     Falls back to the newest non-backup .log if no prefix match exists.
-    """
-    import os
 
-    log_dir = os.path.abspath(str(unreal.Paths.project_log_dir()))
+    Args:
+        log_dir: Override the log directory (defaults to the project log dir).
+        exe_path: Override the executable used to derive the app prefix
+            (defaults to ``sys.executable``). Both overrides exist so the
+            selection logic is unit-testable without a running editor.
+    """
+    if log_dir is None:
+        log_dir = os.path.abspath(str(unreal.Paths.project_log_dir()))
+    if exe_path is None:
+        exe_path = sys.executable
     if not os.path.isdir(log_dir):
         return None
 
     # App prefix from the executable: "UnrealEditorFortnite-Win64-Shipping" -> "UnrealEditorFortnite"
-    app_prefix = os.path.splitext(os.path.basename(sys.executable))[0].split("-")[0]
+    app_prefix = os.path.splitext(os.path.basename(exe_path))[0].split("-")[0]
 
     logs = [f for f in os.listdir(log_dir) if f.lower().endswith(".log") and "-backup-" not in f]
     matching = [f for f in logs if f.startswith(app_prefix)] or logs
@@ -1291,9 +1299,14 @@ def restart_listener(port: int = 0) -> int:
 
 # ---------------------------------------------------------------------------
 # Auto-start when script is executed directly
+#
+# Set UEFN_LISTENER_NO_AUTOSTART=1 to import this module without starting the
+# HTTP server — used by the unit tests, which import the handlers but must not
+# bind a socket or register a tick callback.
 # ---------------------------------------------------------------------------
 
-try:
+def _autostart() -> None:
+    """Replace any previous listener and start a fresh one (run on import)."""
     # If a previous HTTP server exists, stop it cleanly and free the port.
     if unreal._mcp_server is not None:
         _log("Previous listener detected — replacing")
@@ -1326,7 +1339,11 @@ try:
     # NEVER touch the old tkinter window — two tk.Tk() crashes tcl.
     # If the old window is still alive, start_listener will reuse it.
     start_listener()
-except Exception as _e:
-    unreal.log_error(f"[MCP] Failed to start listener: {_e}")
-    import traceback
-    traceback.print_exc()
+
+
+if os.environ.get("UEFN_LISTENER_NO_AUTOSTART") != "1":
+    try:
+        _autostart()
+    except Exception as _e:
+        unreal.log_error(f"[MCP] Failed to start listener: {_e}")
+        traceback.print_exc()
