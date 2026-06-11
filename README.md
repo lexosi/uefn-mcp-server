@@ -6,9 +6,15 @@ Control [UEFN](https://dev.epicgames.com/documentation/en-us/fortnite/unreal-edi
 Claude Code  <--stdio-->  MCP Server (mcp_server.py)  <--HTTP-->  Listener (uefn_listener.py, inside UEFN)
 ```
 
-- **28 tools**: actors, assets, levels, viewport, project info, editor log, and arbitrary Python execution
+- **29 tools**: actors, assets, levels, viewport, **viewport screenshots**, project info, editor log, and arbitrary Python execution
 - **Zero C++ compilation** — pure Python, works across UEFN versions
 - **Main-thread safe** — all `unreal.*` calls dispatched via editor tick callback
+
+## Highlights
+
+- **Visual feedback loop** — `get_viewport_screenshot` renders the editor camera off-screen through a `SceneCapture2D` and returns the PNG to the model. The agent can *see* the scene it is editing and self-correct, instead of working blind. The synchronous capture sidesteps `take_high_res_screenshot`'s deferred, redraw-dependent write.
+- **Built around UEFN's real limits** — UEFN Python is editor-only and runs on the render thread; there is no play-in-editor, LOD generation crashes the editor, and V2 device config lives in Verse, not UPROPERTYs. Tools are designed to stay inside what UEFN actually allows. See [docs/proposed_tools.md](docs/proposed_tools.md) for the feasibility-gated roadmap.
+- **Resilient transport** — auto port discovery (8765-8770), heartbeat liveness, graceful listener hot-reload, and a floating status window with live metrics.
 
 ## Quick Start
 
@@ -62,7 +68,7 @@ Create `.mcp.json` in your project root (or add to `~/.claude/settings.json`):
 
 ### 5. Restart Claude Code
 
-Claude Code picks up `.mcp.json` on startup. After restart, you'll have 28 UEFN tools available.
+Claude Code picks up `.mcp.json` on startup. After restart, you'll have 29 UEFN tools available.
 
 ### Try it
 
@@ -71,6 +77,7 @@ Ask Claude Code:
 - *"Spawn a cube at position 100, 200, 300"*
 - *"What assets are in /Game/Materials/?"*
 - *"Move the viewport camera to look at the origin"*
+- *"Take a screenshot of the viewport and tell me what's wrong with the layout"*
 
 ## Auto-start (optional)
 
@@ -93,7 +100,7 @@ UEFN automatically executes `init_unreal.py` on project open.
 | **Assets** | `list_assets`, `get_asset_info`, `get_selected_assets`, `rename_asset`, `delete_asset`, `duplicate_asset`, `does_asset_exist`, `save_asset`, `search_assets` |
 | **Project** | `get_project_info` |
 | **Level** | `save_current_level`, `get_level_info` |
-| **Viewport** | `get_viewport_camera`, `set_viewport_camera` |
+| **Viewport** | `get_viewport_camera`, `set_viewport_camera`, `get_viewport_screenshot` |
 
 The `execute_python` tool is the most powerful — it runs arbitrary Python code inside the editor with full access to the `unreal` module:
 
@@ -168,10 +175,11 @@ Run via **Tools > Execute Python Script** in the UEFN menu bar.
 | Document | Description |
 |----------|-------------|
 | [Setup Guide](docs/setup.md) | Detailed installation and configuration |
-| [Tools Reference](docs/tools_reference.md) | All 28 tools with parameters, examples, and responses |
+| [Tools Reference](docs/tools_reference.md) | All tools with parameters, examples, and responses |
 | [Architecture](docs/architecture.md) | How the two-component system works internally |
 | [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
 | [UEFN Python Capabilities](docs/uefn_python_capabilities.md) | Full API capabilities map — 37K types across 30 domains |
+| [Proposed Tools (roadmap)](docs/proposed_tools.md) | Feasibility-gated roadmap of candidate tools and UEFN limits |
 
 ## Requirements
 

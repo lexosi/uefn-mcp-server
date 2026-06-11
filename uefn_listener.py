@@ -27,7 +27,7 @@ import unreal
 # Configuration
 # ---------------------------------------------------------------------------
 
-PROTOCOL_VERSION = "0.3.0"
+PROTOCOL_VERSION = "0.4.0"
 DEFAULT_PORT = 8765
 MAX_PORT = 8770
 TICK_BATCH_LIMIT = 5
@@ -727,6 +727,54 @@ def _cmd_set_viewport_camera(
     rot = unreal.Rotator(*rotation) if rotation else cur_rot
     ues.set_level_viewport_camera_info(loc, rot)
     return {"location": _serialize(loc), "rotation": _serialize(rot)}
+
+
+@_register("take_screenshot")
+def _cmd_take_screenshot(width: int = 1280, height: int = 720, fov: float = 90.0) -> dict:
+    """Capture the editor viewport to a PNG and return its path.
+
+    Renders the current viewport camera off-screen through a temporary
+    SceneCapture2D into an RTF_RGBA8 render target, then exports a PNG. This
+    is synchronous and completes in a single command, unlike
+    AutomationLibrary.take_high_res_screenshot, whose write is deferred to a
+    later frame and stalls when the editor window is not redrawing.
+    """
+    import os
+
+    width = max(64, min(int(width), 3840))
+    height = max(64, min(int(height), 2160))
+
+    ues = _unreal_editor_sub()
+    aas = _actor_sub()
+    world = ues.get_editor_world()
+    if world is None:
+        raise RuntimeError("No editor world available")
+
+    cam_loc, cam_rot = ues.get_level_viewport_camera_info()
+
+    render_target = unreal.RenderingLibrary.create_render_target2d(
+        world, width, height, unreal.TextureRenderTargetFormat.RTF_RGBA8
+    )
+    capture = aas.spawn_actor_from_class(unreal.SceneCapture2D, cam_loc, cam_rot)
+    try:
+        comp = capture.get_component_by_class(unreal.SceneCaptureComponent2D)
+        comp.set_editor_property("texture_target", render_target)
+        comp.set_editor_property("capture_source", unreal.SceneCaptureSource.SCS_FINAL_COLOR_LDR)
+        comp.set_editor_property("fov_angle", float(fov))
+        comp.capture_scene()
+
+        out_dir = os.path.join(os.path.abspath(str(unreal.Paths.project_saved_dir())), "Screenshots", "MCP")
+        os.makedirs(out_dir, exist_ok=True)
+        name = f"viewport_{int(time.time() * 1000)}.png"
+        unreal.RenderingLibrary.export_render_target(world, render_target, out_dir, name)
+        path = os.path.join(out_dir, name)
+    finally:
+        # Always remove the temporary capture actor, even on export failure.
+        aas.destroy_actor(capture)
+
+    if not os.path.exists(path):
+        raise RuntimeError("Screenshot export produced no file")
+    return {"path": path, "width": width, "height": height, "size": os.path.getsize(path)}
 
 
 # ---------------------------------------------------------------------------

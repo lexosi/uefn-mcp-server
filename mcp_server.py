@@ -27,7 +27,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -594,6 +594,29 @@ def set_viewport_camera(
         params["rotation"] = rotation
     result = _send_command("set_viewport_camera", params)
     return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def get_viewport_screenshot(width: int = 1280, height: int = 720, fov: float = 90.0) -> Image:
+    """Capture the UEFN editor viewport and return it as an image.
+
+    Renders the current editor camera view off-screen and returns a PNG, so
+    the assistant can see the scene directly. Use it to visually verify actor
+    placement, lighting, materials, and layout after making edits — the visual
+    feedback loop for editing a 3D scene.
+
+    Args:
+        width: Image width in pixels (64-3840).
+        height: Image height in pixels (64-2160).
+        fov: Horizontal field of view in degrees.
+    """
+    result = _send_command("take_screenshot", {"width": width, "height": height, "fov": fov})
+    path = result.get("path")
+    if not path or not os.path.exists(path):
+        raise RuntimeError(f"Screenshot failed: {result}")
+    with open(path, "rb") as f:
+        data = f.read()
+    return Image(data=data, format="png")
 
 
 # ---------------------------------------------------------------------------
